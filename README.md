@@ -24,7 +24,7 @@
 
 | 数据表 | 关键字段 | 业务说明 |
 |--------|---------|---------|
-| **团购订单** (group_order) | `dispute_flag`, `dispute_confirmed`, `refund_amount`, `settlement_batch_id` | 订单级争议/退款/结算关联控制 |
+| **团购订单** (group_order) | `dispute_flag`, `dispute_confirmed`, `refund_amount`, `settlement_batch_id`, `settlement_status` | 订单级争议/退款/结算关联控制，结算状态实时回写 |
 | **售后单** (after_sale_order) | `is_completed`, `deduction_commission`, `refund_type` | 售后完结状态决定订单能否结算 |
 | **退款状态** (refund_status) | `refund_status` (none/pending/partial/full) | 退款进度与金额追踪 |
 | **团长等级** (leader_level) | `commission_rate`, `bonus_rate`, `min_orders` | 4级：普通→银→金→钻，等级变化不影响已锁定批次 |
@@ -60,12 +60,44 @@
 
 | 规则 | 实现方式 | 验证点 |
 |------|---------|--------|
-| **① 售后未完结订单不参与结算** | `check_order_eligible_for_settlement()` 第2层校验：`aftersale.is_completed = False` → 排除，原因 `AFTERSALE_INCOMPLETE` | 验收路径2 |
+| **① 售后未完结订单不参与结算** | `check_order_eligible_for_settlement()` 第2层校验：`aftersale.is_completed = False` → 排除，原因含具体售后单号、类型、状态；返回 `exclude_detail.reason_code = AFTERSALE_INCOMPLETE` + `pending_aftersale_details` 列表 | 验收路径2 |
 | **② 退款订单扣减佣金并展示明细** | `collect_orders_for_settlement()`：按退款比例计算 → `deduction_commission = original × refund/amount`，生成 `deduction_detail` | 验收路径1第5层校验 |
 | **③ 同一订单不能入两个有效批次** | `check_order_eligible_for_settlement()` 第1层：`settlement_batch_id != NULL AND batch.status in [reviewing, reviewed, finance_approved, paid]` | 验收路径3第2步 |
 | **④ 等级变化不影响已锁定批次** | 复核时 `is_locked = True, version += 1` 快照JSON固化；试算时读取快照，不重新拉取实时等级数据 | 版本日志 `v1→v2` |
 | **⑤ 客服未确认争议订单暂缓结算** | 资格校验第3层：`dispute_flag=True AND dispute_confirmed=False` → 排除，原因 `DISPUTE_UNCONFIRMED` | 验收路径2第2子验证 |
 | **⑥ 非财务角色不能确认付款** | `pay()` 接口硬编码 `role != 'finance_reviewer' → 403`；前端按钮 `user.role === 'finance_reviewer'` 才渲染 | 403+前端隐藏 |
+
+---
+
+### 🆕 字段变更与场景增强 (v2)
+
+#### 场景A：结算批次状态变更回写主单 `settlement_status`
+
+当结算批次生成后经历复核→财务确认→付款等状态流转时，自动将批次状态回写到关联订单的 `settlement_status` 字段，实现主单与批次的实时状态同步。
+
+| 批次操作 | 订单 `settlement_status` | 实现位置 |
+|---------|-------------------------|---------|
+| 生成结算批次 (`status = reviewing`) | `reviewing` | `generate_settlement()` |
+| 运营复核通过 (`status = reviewed`) | `reviewed` | `review_settlement()` |
+| 财务确认通过 (`status = finance_approved`) | `finance_approved` | `finance_approve()` |
+| 付款完成 (`status = paid`) | `paid` | `confirm_payment()` |
+| 未关联批次 | `unsettled` (默认值) | 数据库默认 |
+
+订单列表页与详情页均展示 `settlement_status` 标签（未结算/结算试算中/运营已复核/财务已确认/已付款），方便运营人员快速定位订单结算进度。
+
+**回写函数**: `sync_order_settlement_status(db, batch_id, batch_status)` — 在 `settlement_router.py` 中统一处理。
+
+#### 场景B：售后未完结排除时给出详细原因
+
+当订单因"售后未完结"被排除出结算时，排除原因从简单计数升级为结构化明细，包含每条未完结售后的单号、类型、退款状态和原因：
+
+- `exclude_reason`: 人类可读文本，如 `售后未完结：1条售后待处理 [AS20250101U00005(return_refund, 状态:processing)]`
+- `exclude_detail`: 结构化对象，包含：
+  - `reason_code`: 排除原因编码 (`AFTERSALE_INCOMPLETE` / `DISPUTE_UNCONFIRMED` / `ALREADY_IN_BATCH` / `ORDER_STATUS_INVALID`)
+  - `pending_aftersale_details`: 未完结售后列表（`id`, `aftersale_no`, `aftersale_type`, `refund_status`, `reason`）
+  - `pending_aftersale_ids`: 未完结售后 ID 列表
+
+前端排除订单表格支持行展开，点击可查看具体售后原因明细（试算页和批次详情页均生效）。
 
 ---
 
@@ -259,6 +291,8 @@ frontend/                           backend/
 ✅ 6条业务边界     → 硬编码 + 脚本验证
 ✅ 试算快照 + 版本锁 → trial_snapshot JSON + version_logs
 ✅ 幂等生成控制    → 409 Conflict + existing_batch info
+✅ 结算状态回写    → settlement_status 字段 + sync_order_settlement_status
+✅ 售后排除原因    → exclude_detail 结构化原因 + 前端行展开详情
 ```
 
 ---

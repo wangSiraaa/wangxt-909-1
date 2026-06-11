@@ -28,6 +28,13 @@ from ..core.settlement_engine import (
 router = APIRouter(prefix="/api/settlements", tags=["结算管理"])
 
 
+def sync_order_settlement_status(db: Session, batch_id: int, batch_status: str):
+    db.query(GroupOrder).filter(GroupOrder.settlement_batch_id == batch_id).update(
+        {GroupOrder.settlement_status: batch_status},
+        synchronize_session=False
+    )
+
+
 @router.post("/trial-calculation", response_model=TrialCalculationResponse)
 def trial_calculation(
     request: Request,
@@ -150,7 +157,7 @@ def generate_settlement(
     order_ids = [o["order_id"] for o in eligible_orders]
     if order_ids:
         db.query(GroupOrder).filter(GroupOrder.id.in_(order_ids)).update(
-            {GroupOrder.settlement_batch_id: batch.id},
+            {GroupOrder.settlement_batch_id: batch.id, GroupOrder.settlement_status: batch.status},
             synchronize_session=False
         )
 
@@ -312,6 +319,8 @@ def review_settlement(
     batch.is_locked = True
     batch.version += 1
 
+    sync_order_settlement_status(db, batch.id, "reviewed")
+
     create_version_log(
         db, batch.id, batch.version, "OPERATION_REVIEWED", current_user.id,
         old_snapshot, batch.trial_snapshot,
@@ -351,6 +360,8 @@ def finance_approve(
     batch.finance_approved_by = current_user.id
     batch.finance_approved_at = datetime.utcnow()
     batch.version += 1
+
+    sync_order_settlement_status(db, batch.id, "finance_approved")
 
     create_version_log(
         db, batch.id, batch.version, "FINANCE_APPROVED", current_user.id,
@@ -446,6 +457,8 @@ def confirm_payment(
     batch.paid_by = current_user.id
     batch.paid_at = datetime.utcnow()
     batch.version += 1
+
+    sync_order_settlement_status(db, batch.id, "paid")
 
     create_version_log(
         db, batch.id, batch.version, "PAYMENT_CONFIRMED", current_user.id,

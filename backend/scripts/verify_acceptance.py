@@ -226,7 +226,7 @@ def test_path_2():
         for oid in uncompleted_order_ids:
             order = db.query(GroupOrder).filter(GroupOrder.id == oid).first()
             if order:
-                eligible, reason = check_order_eligible_for_settlement(db, order)
+                eligible, reason, _ = check_order_eligible_for_settlement(db, order)
                 result.add_step(
                     f"订单 {order.order_no} 资格判断: 符合={eligible}, 原因={reason}",
                     eligible == False and "售后未完结" in reason,
@@ -267,7 +267,7 @@ def test_path_2():
                 ""
             )
             for d in dispute_unconfirmed:
-                eligible, reason = check_order_eligible_for_settlement(db, d)
+                eligible, reason, _ = check_order_eligible_for_settlement(db, d)
                 result.add_step(
                     f"争议订单 {d.order_no}: 符合={eligible}, 原因={reason}",
                     eligible == False and "争议" in reason,
@@ -387,7 +387,7 @@ def test_path_3():
             for o in eligible[:2]:
                 order = db.query(GroupOrder).filter(GroupOrder.id == o["order_id"]).first()
                 if order:
-                    eligible_check, reason = check_order_eligible_for_settlement(db, order)
+                    eligible_check, reason, _ = check_order_eligible_for_settlement(db, order)
                     result.add_step(
                         f"订单 {order.order_no} 再检查: 符合={eligible_check}, 原因={reason}",
                         eligible_check == False and "已在结算批次" in reason,

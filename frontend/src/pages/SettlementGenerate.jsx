@@ -377,13 +377,54 @@ function OrderTable({ data, showCommission = false }) {
 }
 
 function ExcludedTable({ data }) {
+  const [expandedRows, setExpandedRows] = useState([])
+
   return (
     <Table
       size="small"
       rowKey="order_id"
-      scroll={{ x: 1000 }}
+      scroll={{ x: 1200 }}
       pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }}
       dataSource={data}
+      expandedRowKeys={expandedRows}
+      onExpandedRowsChange={setExpandedRows}
+      expandable={{
+        expandedRowRender: (record) => {
+          const detail = record.exclude_detail
+          if (!detail) return null
+          if (detail.reason_code === 'AFTERSALE_INCOMPLETE' && detail.pending_aftersale_details) {
+            return (
+              <div style={{ padding: '8px 0' }}>
+                <div style={{ marginBottom: 8, fontWeight: 600, color: '#ff4d4f' }}>
+                  售后未完结原因详情：
+                </div>
+                <Table
+                  size="small"
+                  rowKey="id"
+                  pagination={false}
+                  dataSource={detail.pending_aftersale_details}
+                  columns={[
+                    { title: '售后单号', dataIndex: 'aftersale_no', width: 180 },
+                    { title: '售后类型', dataIndex: 'aftersale_type', width: 120 },
+                    { title: '退款状态', dataIndex: 'refund_status', width: 120 },
+                    { title: '售后原因', dataIndex: 'reason', ellipsis: true },
+                  ]}
+                />
+              </div>
+            )
+          }
+          if (detail.reason_code === 'ALREADY_IN_BATCH') {
+            return <div style={{ padding: '8px 0', color: '#fa8c16' }}>该订单已关联结算批次：{detail.batch_no}</div>
+          }
+          if (detail.reason_code === 'DISPUTE_UNCONFIRMED') {
+            return <div style={{ padding: '8px 0', color: '#fa8c16' }}>争议订单需客服确认后方可参与结算</div>
+          }
+          if (detail.reason_code === 'ORDER_STATUS_INVALID') {
+            return <div style={{ padding: '8px 0', color: '#fa8c16' }}>订单当前状态为「{detail.order_status}」，仅已完成/已发货订单可参与结算</div>
+          }
+          return null
+        },
+      }}
       columns={[
         { title: '订单号', dataIndex: 'order_no', width: 160, render: (v) => <span style={{ fontFamily: 'monospace' }}>{v}</span> },
         { title: '商品', dataIndex: 'product_name' },
@@ -392,7 +433,7 @@ function ExcludedTable({ data }) {
         { title: '售后状态', dataIndex: 'aftersale_status', width: 110 },
         {
           title: '排除原因', dataIndex: 'exclude_reason',
-          render: (v) => <Tag color="red" icon={<ExclamationCircleOutlined />}>{v}</Tag>,
+          render: (v) => <Tag color="red" icon={<ExclamationCircleOutlined />} style={{ maxWidth: 400 }}>{v}</Tag>,
         },
       ]}
     />

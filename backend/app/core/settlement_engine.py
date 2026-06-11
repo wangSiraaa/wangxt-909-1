@@ -32,13 +32,13 @@ def get_leader_commission_rate(db: Session, leader_id: int) -> Tuple[float, floa
     return leader.level.commission_rate, leader.level.bonus_rate
 
 
-def check_order_eligible_for_settlement(db: Session, order: GroupOrder) -> Tuple[bool, str]:
+def check_order_eligible_for_settlement(db: Session, order: GroupOrder) -> Tuple[bool, str, Dict]:
     if order.settlement_batch_id is not None:
         batch = db.query(SettlementBatch).filter(
             SettlementBatch.id == order.settlement_batch_id
         ).first()
         if batch and batch.status in ["draft", "reviewing", "reviewed", "finance_approved", "paid"]:
-            return False, f"订单已在结算批次 {batch.batch_no} 中"
+            return False, f"订单已在结算批次 {batch.batch_no} 中", {"reason_code": "ALREADY_IN_BATCH", "batch_no": batch.batch_no}
 
     pending_aftersales = db.query(AfterSaleOrder).filter(
         and_(
@@ -47,15 +47,26 @@ def check_order_eligible_for_settlement(db: Session, order: GroupOrder) -> Tuple
         )
     ).all()
     if pending_aftersales:
-        return False, f"售后未完结：{len(pending_aftersales)}条售后待处理"
+        details = "; ".join(
+            f"{a.aftersale_no}({a.aftersale_type}, 状态:{a.refund_status})"
+            for a in pending_aftersales
+        )
+        return False, f"售后未完结：{len(pending_aftersales)}条售后待处理 [{details}]", {
+            "reason_code": "AFTERSALE_INCOMPLETE",
+            "pending_aftersale_ids": [a.id for a in pending_aftersales],
+            "pending_aftersale_details": [
+                {"id": a.id, "aftersale_no": a.aftersale_no, "aftersale_type": a.aftersale_type, "refund_status": a.refund_status, "reason": a.reason}
+                for a in pending_aftersales
+            ],
+        }
 
     if order.dispute_flag and not order.dispute_confirmed:
-        return False, "存在争议订单，客服未确认"
+        return False, "存在争议订单，客服未确认", {"reason_code": "DISPUTE_UNCONFIRMED"}
 
     if order.order_status not in ["completed", "delivered"]:
-        return False, f"订单状态为{order.order_status}，不参与结算"
+        return False, f"订单状态为{order.order_status}，不参与结算", {"reason_code": "ORDER_STATUS_INVALID", "order_status": order.order_status}
 
-    return True, "符合条件"
+    return True, "符合条件", {}
 
 
 def collect_orders_for_settlement(
@@ -75,7 +86,7 @@ def collect_orders_for_settlement(
     deduction_details = []
 
     for order in orders:
-        eligible, reason = check_order_eligible_for_settlement(db, order)
+        eligible, reason, detail = check_order_eligible_for_settlement(db, order)
 
         order_data = {
             "order_id": order.id,
@@ -95,7 +106,7 @@ def collect_orders_for_settlement(
         }
 
         if not eligible:
-            excluded_orders.append({**order_data, "exclude_reason": reason})
+            excluded_orders.append({**order_data, "exclude_reason": reason, "exclude_detail": detail})
             continue
 
         commission_rate, level_bonus = get_leader_commission_rate(db, order.leader_id)

@@ -118,6 +118,7 @@ class GroupOrder(Base):
     dispute_flag = Column(Boolean, default=False)
     dispute_confirmed = Column(Boolean, default=True)
     settlement_batch_id = Column(Integer, ForeignKey("settlement_batches.id"), nullable=True)
+    settlement_status = Column(String(30), default="unsettled")
     order_date = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
 

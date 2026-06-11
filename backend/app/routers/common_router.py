@@ -73,6 +73,7 @@ def list_orders(
             "dispute_confirmed": o.dispute_confirmed,
             "customer_service_note": o.customer_service_note,
             "settlement_batch_id": o.settlement_batch_id,
+            "settlement_status": o.settlement_status,
             "order_date": o.order_date,
         }
         if o.leader and o.leader.user:
@@ -112,6 +113,7 @@ def get_order_detail(
         "dispute_flag": o.dispute_flag,
         "dispute_confirmed": o.dispute_confirmed,
         "customer_service_note": o.customer_service_note,
+        "settlement_status": o.settlement_status,
         "order_date": o.order_date,
         "leader_name": o.leader.user.full_name if o.leader and o.leader.user else "",
         "supplier_name": o.supplier.supplier_name if o.supplier else "",

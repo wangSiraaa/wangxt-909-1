@@ -19,6 +19,14 @@ const AFTERSALE_MAP = {
   rejected: { text: '售后驳回', color: 'default' },
 }
 
+const SETTLEMENT_STATUS_MAP = {
+  unsettled: { text: '未结算', color: 'default' },
+  reviewing: { text: '结算试算中', color: 'processing' },
+  reviewed: { text: '运营已复核', color: 'orange' },
+  finance_approved: { text: '财务已确认', color: 'purple' },
+  paid: { text: '已付款', color: 'success' },
+}
+
 export default function Orders() {
   const [data, setData] = useState([])
   const [loading, setLoading] = useState(false)
@@ -109,6 +117,15 @@ export default function Orders() {
           text={r.dispute_confirmed ? '已解决' : '待确认'} />
       ) : '-',
     },
+    {
+      title: '结算状态',
+      dataIndex: 'settlement_status',
+      width: 120,
+      render: (v) => {
+        const s = SETTLEMENT_STATUS_MAP[v] || { text: v || '未结算', color: 'default' }
+        return <Tag color={s.color}>{s.text}</Tag>
+      },
+    },
     user?.role === 'operation_accountant' && { title: '团长', dataIndex: 'leader_name', width: 100 },
     user?.role === 'operation_accountant' && { title: '供应商', dataIndex: 'supplier_name', width: 140, ellipsis: true },
     {
@@ -169,7 +186,7 @@ export default function Orders() {
           columns={columns}
           dataSource={data}
           loading={loading}
-          scroll={{ x: 1400 }}
+          scroll={{ x: 1520 }}
           pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
         />
       </Card>
@@ -197,6 +214,11 @@ export default function Orders() {
               <Descriptions.Item label="售后状态">
                 <Tag color={AFTERSALE_MAP[detail.aftersale_status]?.color || 'default'}>
                   {AFTERSALE_MAP[detail.aftersale_status]?.text || detail.aftersale_status || '无'}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="结算状态">
+                <Tag color={SETTLEMENT_STATUS_MAP[detail.settlement_status]?.color || 'default'}>
+                  {SETTLEMENT_STATUS_MAP[detail.settlement_status]?.text || detail.settlement_status || '未结算'}
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="团长">{detail.leader_name || '-'}</Descriptions.Item>

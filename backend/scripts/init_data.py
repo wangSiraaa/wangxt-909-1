@@ -182,6 +182,7 @@ def init_database():
                     dispute_confirmed=not has_dispute,
                     customer_service_note="存在价格争议，待客服确认" if has_dispute else None,
                     settlement_batch_id=None,
+                    settlement_status="unsettled",
                     order_date=order_date,
                 )
                 db.add(order)

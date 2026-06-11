@@ -248,6 +248,41 @@ export default function SettlementDetail() {
                       rowKey="order_id"
                       pagination={{ pageSize: 10 }}
                       dataSource={snapshot?.excluded_orders || []}
+                      expandable={{
+                        expandedRowRender: (record) => {
+                          const detail = record.exclude_detail
+                          if (!detail) return null
+                          if (detail.reason_code === 'AFTERSALE_INCOMPLETE' && detail.pending_aftersale_details) {
+                            return (
+                              <div style={{ padding: '8px 0' }}>
+                                <div style={{ marginBottom: 8, fontWeight: 600, color: '#ff4d4f' }}>售后未完结原因详情：</div>
+                                <Table
+                                  size="small"
+                                  rowKey="id"
+                                  pagination={false}
+                                  dataSource={detail.pending_aftersale_details}
+                                  columns={[
+                                    { title: '售后单号', dataIndex: 'aftersale_no', width: 180 },
+                                    { title: '售后类型', dataIndex: 'aftersale_type', width: 120 },
+                                    { title: '退款状态', dataIndex: 'refund_status', width: 120 },
+                                    { title: '售后原因', dataIndex: 'reason', ellipsis: true },
+                                  ]}
+                                />
+                              </div>
+                            )
+                          }
+                          if (detail.reason_code === 'ALREADY_IN_BATCH') {
+                            return <div style={{ padding: '8px 0', color: '#fa8c16' }}>该订单已关联结算批次：{detail.batch_no}</div>
+                          }
+                          if (detail.reason_code === 'DISPUTE_UNCONFIRMED') {
+                            return <div style={{ padding: '8px 0', color: '#fa8c16' }}>争议订单需客服确认后方可参与结算</div>
+                          }
+                          if (detail.reason_code === 'ORDER_STATUS_INVALID') {
+                            return <div style={{ padding: '8px 0', color: '#fa8c16' }}>订单当前状态为「{detail.order_status}」，仅已完成/已发货订单可参与结算</div>
+                          }
+                          return null
+                        },
+                      }}
                       columns={[
                         { title: '订单号', dataIndex: 'order_no', width: 150 },
                         { title: '商品', dataIndex: 'product_name' },

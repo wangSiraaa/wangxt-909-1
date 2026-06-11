@@ -29,13 +29,17 @@ export function AuthGuard({ children }) {
     const userStr = localStorage.getItem('user')
     if (token && userStr) {
       try {
-        setUser(JSON.parse(userStr))
+        const parsed = JSON.parse(userStr)
+        setUser(parsed)
       } catch (e) {
-          navigate('/login')
-        }
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        navigate('/login')
       }
-    } else if (location.pathname !== '/login') {
-      navigate('/login')
+    } else {
+      if (location.pathname !== '/login') {
+        navigate('/login')
+      }
     }
     setLoading(false)
   }, [location.pathname, navigate])
@@ -60,10 +64,12 @@ export function RoleGuard({ roles, children }) {
   const user = userStr ? JSON.parse(userStr) : null
   if (!user) return <Navigate to="/login" replace />
   if (roles && !roles.includes(user.role)) {
-    return <div style={{ padding: 50, textAlign: 'center' }}>
-      <h2>权限不足</h2>
-      <p>您的角色 [{user.role_name || user.role} 无法访问此页面</p>
-    </div>
+    return (
+      <div style={{ padding: 50, textAlign: 'center' }}>
+        <h2>权限不足</h2>
+        <p>您的角色 [{user.role_name || user.role}] 无法访问此页面</p>
+      </div>
+    )
   }
   return children
 }
@@ -121,8 +127,8 @@ export default function App() {
         } />
         <Route path="*" element={
           <div style={{ padding: 50, textAlign: 'center' }}>
-          <h2>404 页面不存在</h2>
-        </div>
+            <h2>404 页面不存在</h2>
+          </div>
         } />
       </Route>
     </Routes>

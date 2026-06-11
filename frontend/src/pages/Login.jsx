@@ -25,7 +25,8 @@ export default function Login() {
       const res = await authApi.login(values.username.trim(), values.password)
       localStorage.setItem('token', res.access_token)
       localStorage.setItem('user', JSON.stringify(res.user))
-      message.success(`欢迎回来，${res.user.full_name}！')
+      const displayName = res.user.full_name || res.user.username || '用户'
+      message.success(`欢迎回来，${displayName}！`)
       navigate('/dashboard')
     } catch (e) {
       // 拦截器已处理
@@ -52,7 +53,7 @@ export default function Login() {
         <Divider />
 
         <Alert
-          message="测试账户（密码均为 123456）
+          message="测试账户（密码均为 123456）"
           description={
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
               {TEST_ACCOUNTS.map((a) => (

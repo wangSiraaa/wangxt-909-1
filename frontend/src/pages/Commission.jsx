@@ -173,7 +173,7 @@ function MySupplierView() {
         <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
           <Col xs={24} sm={8} md={6}><Card><Statistic title="货款总额" prefix="¥" value={info.total_payable} precision={2} /></Card></Col>
           <Col xs={24} sm={8} md={6}><Card><Statistic title="已付货款" prefix="¥" value={info.paid_amount} precision={2} valueStyle={{ color: '#52c41a' }} /></Card></Col>
-          <Col xs={24} sm={8} md={6}><Card><Statistic title="待付货款" prefix="¥" value={info.pending_amount} precision={2} valueStyle={{ color: '#1677ff' }} /></Card>
+          <Col xs={24} sm={8} md={6}><Card><Statistic title="待付货款" prefix="¥" value={info.pending_amount} precision={2} valueStyle={{ color: '#1677ff' }} /></Card></Col>
           <Col xs={24} md={6}><Card type="inner" title="收款账户">
             <div style={{ fontSize: 13 }}>
               <div>{info.bank_name || '-'}</div>

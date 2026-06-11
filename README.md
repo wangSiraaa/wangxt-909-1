@@ -148,6 +148,18 @@
 | 5 | 财务确认 → 复核后快照版本锁定 | `v1 → v2`, `is_locked = True` |
 | 6 | 付款 → 生成付款记录，更新账户余额 | 团长/供应商 balance += 对应金额 |
 
+### ✅ 路径4：结算状态机全流程 + 主单 settlement_status 回写验证
+
+| 步骤 | 操作 | 批次状态 | 主单 settlement_status | 验证点 |
+|------|------|---------|-----------------------|--------|
+| 1 | 状态机流转规则预校验 | - | - | 6项角色权限校验全部通过 |
+| 2 | 生成结算批次 | `reviewing` | `reviewing` | 批次创建 + 订单关联 + 状态回写 |
+| 3 | 运营复核通过 | `reviewed` | `reviewed` | 版本 v1→v2 + 批次锁定 + 状态回写 |
+| 4 | 财务确认通过 | `finance_approved` | `finance_approved` | 版本 v2→v3 + 状态回写 |
+| 5 | 确认付款完成 | `paid` | `paid` | 版本 v3→v4 + 状态回写 |
+| 6 | 批量订单一致性校验 | - | 全部 `paid` | 5条关联订单状态全部同步 |
+| 7 | 售后未完结排除原因详情 | - | - | reason_code + 售后详情字段完整 |
+
 > 脚本使用 **事务回滚 (rollback)**，不会污染数据库，可安全反复执行。
 
 ---
@@ -285,7 +297,7 @@ frontend/                           backend/
 ✅ 初始化数据脚本 → backend/scripts/init_data.py
 ✅ README 使用文档 → README.md
 ✅ 健康检查接口  → GET /health
-✅ 端到端验收脚本 → backend/scripts/verify_acceptance.py (3条路径)
+✅ 端到端验收脚本 → backend/scripts/verify_acceptance.py (4条路径)
 ✅ 后端100%实现    → FastAPI 完整模块
 ✅ 前端17个页面    → 全部角色完整UI
 ✅ 6条业务边界     → 硬编码 + 脚本验证

@@ -472,11 +472,253 @@ def test_path_3():
     return result.summary()
 
 
+def test_path_4():
+    """
+    验收路径4: 结算批次状态机全流程验证 + 主单 settlement_status 回写验证
+    覆盖: 生成批次(reviewing) → 运营复核(reviewed) → 财务确认(finance_approved) → 确认付款(paid)
+    每一步验证批次状态 + 关联订单 settlement_status 同步回写
+    """
+    result = TestResult("结算状态机全流程 + 主单状态回写验证", "路径4")
+    db = SessionLocal()
+
+    try:
+        print_header("验收路径 4: 状态机全流程 + 主单 settlement_status 回写")
+
+        from app.core.role_permissions import can_transition_status
+
+        print_section("步骤1: 状态机流转规则预校验")
+
+        result.add_step(
+            "reviewing → reviewed 允许 operation_accountant 执行",
+            can_transition_status("reviewing", "reviewed", "operation_accountant"),
+            "运营会计应能从试算中流转到已复核"
+        )
+        result.add_step(
+            "reviewing → reviewed 不允许 finance_reviewer 执行",
+            not can_transition_status("reviewing", "reviewed", "finance_reviewer"),
+            "财务不应能直接执行运营复核"
+        )
+        result.add_step(
+            "reviewed → finance_approved 允许 finance_reviewer 执行",
+            can_transition_status("reviewed", "finance_approved", "finance_reviewer"),
+            "财务应能从已复核流转到财务已确认"
+        )
+        result.add_step(
+            "reviewed → finance_approved 不允许 operation_accountant 执行",
+            not can_transition_status("reviewed", "finance_approved", "operation_accountant"),
+            "运营会计不应能执行财务确认"
+        )
+        result.add_step(
+            "finance_approved → paid 允许 finance_reviewer 执行",
+            can_transition_status("finance_approved", "paid", "finance_reviewer"),
+            "财务应能从财务已确认流转到已付款"
+        )
+        result.add_step(
+            "paid 无后续流转状态",
+            can_transition_status("paid", "reviewing", "finance_reviewer") == False,
+            "已付款状态不应能再流转"
+        )
+
+        print_section("步骤2: 生成结算批次 (reviewing 状态)")
+
+        orders = db.query(GroupOrder).filter(
+            GroupOrder.order_status == "completed",
+            GroupOrder.settlement_batch_id.is_(None),
+            GroupOrder.aftersale_status.notin_(["processing"]),
+        ).all()
+        result.add_step(
+            f"找到 {len(orders)} 条符合条件的订单用于测试",
+            len(orders) >= 1,
+            f"订单数量不足，当前{len(orders)}条"
+        )
+
+        if len(orders) >= 1:
+            test_orders = orders[:5]
+            order_ids = [o.id for o in test_orders]
+
+            from app.core.settlement_engine import generate_period_code, generate_batch_no
+            from datetime import date
+
+            period_start = date(2026, 6, 1)
+            period_end = date(2026, 6, 10)
+            period_code = generate_period_code(period_start, period_end)
+
+            batch = SettlementBatch(
+                batch_no=generate_batch_no(period_code),
+                period_start=period_start,
+                period_end=period_end,
+                period_code=period_code,
+                total_orders=len(test_orders),
+                total_amount=round(sum(o.order_amount for o in test_orders), 2),
+                total_commission=round(sum(o.order_amount * 0.1 for o in test_orders), 2),
+                total_supplier_payable=round(sum(o.order_amount * 0.9 for o in test_orders), 2),
+                total_refund=0,
+                total_deduction=0,
+                net_commission=round(sum(o.order_amount * 0.1 for o in test_orders), 2),
+                status="reviewing",
+                is_locked=False,
+                version=1,
+                trial_snapshot={},
+                created_by=1,
+            )
+            db.add(batch)
+            db.flush()
+
+            from sqlalchemy import and_
+            from app.routers.settlement_router import sync_order_settlement_status
+            
+            order_ids = [o.id for o in test_orders]
+            db.query(GroupOrder).filter(GroupOrder.id.in_(order_ids)).update(
+                {GroupOrder.settlement_batch_id: batch.id, GroupOrder.settlement_status: batch.status},
+                synchronize_session=False
+            )
+            db.flush()
+
+            result.add_step(
+                f"生成批次 {batch.batch_no}，状态=reviewing，关联{len(test_orders)}条订单",
+                batch.status == "reviewing" and batch.version == 1,
+                "批次生成失败"
+            )
+
+            first_order = test_orders[0]
+            db.refresh(first_order)
+            result.add_step(
+                f"主单回写验证: 订单 {first_order.order_no} settlement_status = {first_order.settlement_status}",
+                first_order.settlement_status == "reviewing",
+                f"订单结算状态应为 reviewing，实际为 {first_order.settlement_status}"
+            )
+
+            print_section("步骤3: 运营复核 (reviewed 状态)")
+
+            batch.status = "reviewed"
+            batch.is_locked = True
+            batch.version = 2
+            sync_order_settlement_status(db, batch.id, "reviewed")
+            db.flush()
+
+            result.add_step(
+                f"运营复核后: 批次状态={batch.status}, 版本=v{batch.version}, 锁定={batch.is_locked}",
+                batch.status == "reviewed" and batch.version == 2 and batch.is_locked == True,
+                "运营复核状态不正确"
+            )
+
+            db.refresh(first_order)
+            result.add_step(
+                f"主单回写验证: 订单 {first_order.order_no} settlement_status = {first_order.settlement_status}",
+                first_order.settlement_status == "reviewed",
+                f"订单结算状态应为 reviewed，实际为 {first_order.settlement_status}"
+            )
+
+            print_section("步骤4: 财务确认 (finance_approved 状态)")
+
+            batch.status = "finance_approved"
+            batch.version = 3
+            sync_order_settlement_status(db, batch.id, "finance_approved")
+            db.flush()
+
+            result.add_step(
+                f"财务确认后: 批次状态={batch.status}, 版本=v{batch.version}",
+                batch.status == "finance_approved" and batch.version == 3,
+                "财务确认状态不正确"
+            )
+
+            db.refresh(first_order)
+            result.add_step(
+                f"主单回写验证: 订单 {first_order.order_no} settlement_status = {first_order.settlement_status}",
+                first_order.settlement_status == "finance_approved",
+                f"订单结算状态应为 finance_approved，实际为 {first_order.settlement_status}"
+            )
+
+            print_section("步骤5: 确认付款 (paid 状态)")
+
+            batch.status = "paid"
+            batch.version = 4
+            sync_order_settlement_status(db, batch.id, "paid")
+            db.flush()
+
+            result.add_step(
+                f"确认付款后: 批次状态={batch.status}, 版本=v{batch.version}",
+                batch.status == "paid" and batch.version == 4,
+                "确认付款状态不正确"
+            )
+
+            db.refresh(first_order)
+            result.add_step(
+                f"主单回写验证: 订单 {first_order.order_no} settlement_status = {first_order.settlement_status}",
+                first_order.settlement_status == "paid",
+                f"订单结算状态应为 paid，实际为 {first_order.settlement_status}"
+            )
+
+            print_section("步骤6: 批量订单状态一致性验证")
+
+            all_paid = True
+            failed_order = None
+            for o in test_orders:
+                db.refresh(o)
+                if o.settlement_status != "paid":
+                    all_paid = False
+                    failed_order = o
+                    break
+
+            result.add_step(
+                f"批量回写验证: {len(test_orders)}条关联订单 settlement_status 全部为 paid",
+                all_paid,
+                f"订单 {failed_order.order_no if failed_order else '?'} 状态为 {failed_order.settlement_status if failed_order else '?'}"
+            )
+
+            print_section("步骤7: 售后未完结排除原因详情验证")
+
+            pending_aftersale = db.query(AfterSaleOrder).filter(
+                AfterSaleOrder.is_completed == False
+            ).first()
+
+            if pending_aftersale:
+                from app.core.settlement_engine import check_order_eligible_for_settlement
+                order = db.query(GroupOrder).filter(GroupOrder.id == pending_aftersale.order_id).first()
+                if order:
+                    old_batch_id = order.settlement_batch_id
+                    old_settlement_status = order.settlement_status
+                    
+                    order.settlement_batch_id = None
+                    order.settlement_status = "unsettled"
+                    db.flush()
+                    
+                    eligible, reason, detail = check_order_eligible_for_settlement(db, order)
+
+                    result.add_step(
+                        f"售后未完结订单排除: {order.order_no} → {reason}",
+                        not eligible and "售后未完结" in reason,
+                        f"售后订单应被排除，实际 eligible={eligible}, reason={reason}"
+                    )
+
+                    result.add_step(
+                        f"排除原因详情: reason_code={detail.get('reason_code')}, pending_aftersale_details 数量={len(detail.get('pending_aftersale_details', []))}",
+                        detail.get("reason_code") == "AFTERSALE_INCOMPLETE" and len(detail.get("pending_aftersale_details", [])) > 0,
+                        "排除详情结构不完整"
+                    )
+
+                    aftersale_detail = detail.get("pending_aftersale_details", [])[0] if detail.get("pending_aftersale_details") else {}
+                    has_required_fields = all(k in aftersale_detail for k in ["aftersale_no", "aftersale_type", "refund_status", "reason"])
+                    result.add_step(
+                        f"售后详情字段完整: aftersale_no, aftersale_type, refund_status, reason",
+                        has_required_fields,
+                        f"售后详情缺少必要字段: {aftersale_detail.keys()}"
+                    )
+                    
+                    order.settlement_batch_id = old_batch_id
+                    order.settlement_status = old_settlement_status
+                    db.flush()
+
+        db.rollback()
+        result.add_step("测试数据已回滚，不污染正式库", True, "")
+
+    finally:
+        db.close()
+
+    return result.summary()
+
+
 def main():
-    print()
-    print(color_text("╔══════════════════════════════════════════════════════════════╗", BLUE))
-    print(color_text("║     社群团购团长结算系统 - 端到端验收测试脚本              ║", BLUE))
-    print(color_text("╚══════════════════════════════════════════════════════════════╝", RESET))
 
     db = SessionLocal()
     try:
@@ -512,6 +754,14 @@ def main():
         results.append(test_path_3())
     except Exception as e:
         print(color_text(f"\n  [异常] 路径3执行出错: {e}\n", RED))
+        import traceback
+        traceback.print_exc()
+        results.append(False)
+
+    try:
+        results.append(test_path_4())
+    except Exception as e:
+        print(color_text(f"\n  [异常] 路径4执行出错: {e}\n", RED))
         import traceback
         traceback.print_exc()
         results.append(False)

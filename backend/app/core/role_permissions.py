@@ -298,7 +298,7 @@ BATCH_STATUS_FLOW = {
     },
     "reviewed": {
         "next": ["finance_approved", "reviewing"],
-        "allowed_roles": ["operation_accountant"],
+        "allowed_roles": ["finance_reviewer"],
         "display_name": "运营已复核",
     },
     "finance_approved": {
